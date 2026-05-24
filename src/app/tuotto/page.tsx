@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { SellerResult } from '@/lib/rjmob'
+import { SellerResult, sortSheetFilesByDateDesc } from '@/lib/rjmob'
 
 interface DashData {
   kuukausi: string
@@ -111,7 +111,7 @@ export default function TuottoPage() {
 
   useEffect(() => {
     fetch('/api/files').then(r=>r.json()).then(d => {
-      const sheets = (d.files??[]).filter((f:DriveFile)=>f.mimeType==='application/vnd.google-apps.spreadsheet').reverse()
+      const sheets = sortSheetFilesByDateDesc((d.files??[]).filter((f:DriveFile)=>f.mimeType==='application/vnd.google-apps.spreadsheet'))
       setFiles(sheets)
       if (sheets.length>0) setSelectedFile(sheets[0].id)
     }).finally(()=>setFilesLoading(false))

@@ -76,6 +76,66 @@ export function shouldSkip(nimi: string): boolean {
   return SKIP_ROWS.some(s => nimi.toLowerCase().includes(s))
 }
 
+const MONTH_NAME_ORDER: Record<string, number> = {
+  tammikuu: 1, tammi: 1,
+  helmikuu: 2, helmi: 2,
+  maaliskuu: 3, maalis: 3,
+  huhtikuu: 4, huhti: 4,
+  toukokuu: 5, touko: 5,
+  kesäkuu: 6, kesä: 6, kesa: 6,
+  heinäkuu: 7, heinä: 7, heina: 7,
+  elokuu: 8, elo: 8,
+  syyskuu: 9, syys: 9,
+  lokakuu: 10, loka: 10,
+  marraskuu: 11, marras: 11,
+  joulukuu: 12, joulu: 12,
+}
+
+export function parseSheetDate(name: string): { year: number; month: number } {
+  const yearMatch = name.match(/(20\d{2})/)
+  const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear()
+  const normalized = name
+    .toLowerCase()
+    .replace('myyntiseuranta', '')
+    .replace(/20\d{2}/g, ' ')
+    .replace(/[^a-zäö0-9 ]/g, ' ')
+    .trim()
+
+  const tokens = normalized.split(/\s+/).filter(Boolean)
+  const monthToken = tokens.find(token => Object.prototype.hasOwnProperty.call(MONTH_NAME_ORDER, token)) ?? ''
+  const monthFromName = MONTH_NAME_ORDER[monthToken] ?? 0
+
+  const prefixMatch = normalized.match(/^\s*(\d{1,2})/) 
+  const monthFromPrefix = prefixMatch ? Number(prefixMatch[1]) : 0
+
+  const monthFromNumber = tokens
+    .map(token => Number(token))
+    .find(num => Number.isInteger(num) && num >= 1 && num <= 12) ?? 0
+
+  return {
+    year,
+    month: monthFromPrefix || monthFromName || monthFromNumber || 0,
+  }
+}
+
+export function sortSheetFilesByDateDesc<T extends { name: string }>(files: T[]) {
+  return [...files].sort((a, b) => {
+    const aa = parseSheetDate(a.name)
+    const bb = parseSheetDate(b.name)
+    if (bb.year !== aa.year) return bb.year - aa.year
+    return bb.month - aa.month
+  })
+}
+
+export function sortSheetFilesByDateAsc<T extends { name: string }>(files: T[]) {
+  return [...files].sort((a, b) => {
+    const aa = parseSheetDate(a.name)
+    const bb = parseSheetDate(b.name)
+    if (aa.year !== bb.year) return aa.year - bb.year
+    return aa.month - bb.month
+  })
+}
+
 export interface SellerRaw {
   nimi: string
   liittKpl: number

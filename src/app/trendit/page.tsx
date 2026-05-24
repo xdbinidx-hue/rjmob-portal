@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { sortSheetFilesByDateAsc } from '@/lib/rjmob'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts'
 
 interface MonthData {
@@ -46,9 +47,9 @@ export default function TrendPage() {
     fetch('/api/files')
       .then(r => r.json())
       .then(async d => {
-        const sheets = (d.files ?? []).filter((f: {mimeType:string}) =>
+        const sheets = sortSheetFilesByDateAsc((d.files ?? []).filter((f: {mimeType:string}) =>
           f.mimeType === 'application/vnd.google-apps.spreadsheet'
-        ).reverse()
+        ))
 
         const results: MonthData[] = []
         for (const f of sheets as {id:string,name:string}[]) {

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { sortSheetFilesByDateDesc } from '@/lib/rjmob'
 
 interface SellerResult {
   nimi: string
@@ -27,6 +28,7 @@ interface DriveFile {
   id: string
   name: string
   mimeType: string
+  modifiedTime?: string
 }
 
 function TopBar({ activePage, files = [], selectedFile = '', onFileChange }: {
@@ -82,11 +84,11 @@ export default function EtelanHaratPage() {
     fetch('/api/files')
       .then(r => r.json())
       .then(d => {
-        const sheets = (d.files ?? []).filter((f: DriveFile) =>
+        const sheets = sortSheetFilesByDateDesc((d.files ?? []).filter((f: DriveFile) =>
           f.mimeType === 'application/vnd.google-apps.spreadsheet'
-        )
+        ))
         setFiles(sheets)
-        if (sheets.length > 0) setSelectedFile(sheets[sheets.length - 1].id)
+        if (sheets.length > 0) setSelectedFile(sheets[0].id)
       })
   }, [])
 
