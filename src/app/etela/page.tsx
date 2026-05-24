@@ -38,7 +38,7 @@ function TopBar({ activePage, files = [], selectedFile = '', onFileChange }: {
 }) {
   return (
     <div style={{background:'white', borderBottom:'0.5px solid #eee', padding:'0 16px', display:'flex', alignItems:'center', height:48, position:'sticky', top:0, zIndex:10, gap:0}}>
-      <span style={{fontWeight:600, fontSize:14, color:'#111', marginRight:24, whiteSpace:'nowrap'}}>RJ-Mob</span>
+      <a href="/" style={{fontWeight:700, fontSize:15, color:'#111', marginRight:24, whiteSpace:'nowrap', textDecoration:'none'}}>RJ-Mob</a>
       {[
         {label:'Tuottoseuranta', href:'/tuotto'},
         {label:'Trendit', href:'/trendit'},
@@ -84,7 +84,7 @@ export default function EtelanHaratPage() {
       .then(r => r.json())
       .then(d => {
         const parsePrefix = (name: string) => {
-          const match = name.match(/(d{1,3})./) 
+          const match = name.match(/([0-9]{1,3})\./)
           return match ? Number(match[1]) : 0
         }
 
