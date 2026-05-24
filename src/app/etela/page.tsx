@@ -84,7 +84,7 @@ export default function EtelanHaratPage() {
       .then(r => r.json())
       .then(d => {
         const parsePrefix = (name: string) => {
-          const match = name.match(/^\s*(\d{1,3})/) 
+          const match = name.match(/(d{1,3})./) 
           return match ? Number(match[1]) : 0
         }
 
