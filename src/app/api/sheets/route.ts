@@ -1,0 +1,342 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { google } from 'googleapis'
+import { laskeMyyja, shouldSkip, isStandi, isRJMobSeller, SellerRaw, FSEC_RECURRING, FSEC_TOTAL_SELLER, FSEC_INTERNET_SELLER } from '@/lib/rjmob'
+
+function getAuth() {
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY!)
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/spreadsheets.readonly'],
+  })
+}
+
+function parseNum(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0
+  const n = parseFloat(String(v).replace(',', '.').replace(/[^0-9.-]/g, ''))
+  return isNaN(n) ? 0 : n
+}
+
+function findCol(headers: string[], ...patterns: string[]): number {
+  for (const p of patterns) {
+    const idx = headers.findIndex(h => h.toLowerCase().includes(p.toLowerCase()))
+    if (idx >= 0) return idx
+  }
+  return -1
+}
+
+const RJ_STORES = ['malmi', 'easton', 'holma', 'syke', 'kivistö', 'kivisto']
+
+export async function GET(req: NextRequest) {
+  const fileId = req.nextUrl.searchParams.get('fileId')
+  if (!fileId) return NextResponse.json({ error: 'fileId required' }, { status: 400 })
+
+  try {
+    const auth = getAuth()
+    const sheets = google.sheets({ version: 'v4', auth })
+    const drive = google.drive({ version: 'v3', auth })
+
+    const meta = await drive.files.get({ fileId, fields: 'name,mimeType' })
+    const fileName = meta.data.name ?? 'Myyntiseuranta'
+
+    const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId: fileId })
+    const sheetNames = sheetMeta.data.sheets?.map(s => s.properties?.title ?? '') ?? []
+
+    const hasDataSheet = sheetNames.some(n => n.toLowerCase() === 'data')
+    const hasMyyjalista = sheetNames.some(n => n.toLowerCase().includes('myyjät yhteensä') || n.toLowerCase().includes('myyjat yhteensa'))
+
+    if (hasDataSheet && hasMyyjalista) {
+      return await parseNewFormat(sheets, fileId, sheetNames, fileName)
+    } else {
+      return await parseOldFormat(sheets, fileId, sheetNames, fileName)
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+async function parseNewFormat(sheets: ReturnType<typeof google.sheets>, fileId: string, sheetNames: string[], fileName: string) {
+  const myyjatSheet = sheetNames.find(n => n.toLowerCase().includes('myyjät yhteensä') || n.toLowerCase().includes('myyjat yhteensa')) ?? sheetNames[0]
+  const myymalaSheet = sheetNames.find(n => n.toLowerCase().includes('myymäl') || n.toLowerCase().includes('myymäl')) ?? ''
+  const dataSheet = sheetNames.find(n => n.toLowerCase() === 'data') ?? ''
+
+  const myyjatRes = await sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: `'${myyjatSheet}'!A1:Z200` })
+  const myyjatRows = (myyjatRes.data.values ?? []).map((r: unknown[]) => r.map((c: unknown) => String(c ?? '')))
+
+  let headerIdx = -1
+  for (let i = 0; i < myyjatRows.length; i++) {
+    if (myyjatRows[i].some(c => c.toUpperCase() === 'MYYJÄ' || c.toUpperCase() === 'MYYJAT')) { headerIdx = i; break }
+  }
+  if (headerIdx < 0) {
+    for (let i = 0; i < myyjatRows.length; i++) {
+      if (myyjatRows[i].some(c => c.toLowerCase().includes('kassaprovisio') || c.toLowerCase().includes('liittymäprovisio'))) { headerIdx = i; break }
+    }
+  }
+  if (headerIdx < 0) return NextResponse.json({ error: 'Header row not found in new format' }, { status: 400 })
+
+  const headers = myyjatRows[headerIdx].map(h => h.toLowerCase().trim())
+  const idxMyyjä = findCol(headers, 'myyjä', 'myyjat', 'nimi')
+  const idxLiittEur = findCol(headers, 'liittymäprovisio', 'liittymäprov', 'liittymä €', 'liittymä€')
+  const idxKassaEur = findCol(headers, 'kassaprovisio', 'kassaprov')
+  const idxLiittKpl = findCol(headers, 'liittymä kpl', 'liittymäkpl', 'liittymät kpl')
+  const idxFsecTotal = findCol(headers, 'f-secure total', 'fsecure total', 'f-secure total security')
+  const idxFsecInternet = findCol(headers, 'f-secure internet', 'fsecure internet', 'f-secure internet security')
+  const idxFsecKpl = findCol(headers, 'f-secure kpl', 'fsecure kpl', 'fsec kpl')
+  const idxTunnit = findCol(headers, 'tunnit')
+
+  const hoursMap: Record<string, { total: number, normaali: number, koulutus: number, sairas: number }> = {}
+  if (dataSheet) {
+    const dataRes = await sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: `'${dataSheet}'!A1:P200` })
+    const dataRows = (dataRes.data.values ?? []).map((r: unknown[]) => r.map((c: unknown) => String(c ?? '')))
+    const dataHeaders = dataRows[0]?.map(h => h.toLowerCase().trim()) ?? []
+    const dNimi = findCol(dataHeaders, 'nimi')
+    const dTotal = findCol(dataHeaders, 'kokonaistunnit', 'tunnit yhteensä', 'kokonais')
+    const dNormaali = findCol(dataHeaders, 'normaali työ', 'normaali')
+    const dKoulutus = findCol(dataHeaders, 'koulutus', 'palaveri', 'koulutus/palaveri')
+    const dSairas = findCol(dataHeaders, 'sairas')
+    const absenceColNames = ['koulutus', 'palaveri', 'sairas', 'isyysvapaa', 'isyys', 'äitiysvapaa', 'äitiys', 'vanhempainvapaa', 'vanhempain', 'lomautus', 'poissaolo']
+    const absenceCols = dataHeaders.map((h, i) => absenceColNames.some(a => h.includes(a)) ? i : -1).filter(i => i >= 0)
+
+    for (let i = 1; i < dataRows.length; i++) {
+      const row = dataRows[i]
+      if (!row[dNimi]) continue
+      const rawNimi = row[dNimi].trim()
+      const parts = rawNimi.split(' ')
+      const normalized = parts.length >= 2 ? parts[1] + ' ' + parts[0] : rawNimi
+      const totalH = parseNum(row[dTotal])
+      let normaaliH = dNormaali >= 0 ? parseNum(row[dNormaali]) : totalH
+      if (dNormaali < 0 && absenceCols.length > 0) {
+        const totalAbsences = absenceCols.reduce((s, ci) => s + parseNum(row[ci]), 0)
+        normaaliH = Math.max(0, totalH - totalAbsences)
+      }
+      hoursMap[normalized.toLowerCase()] = { total: totalH, normaali: normaaliH, koulutus: dKoulutus >= 0 ? parseNum(row[dKoulutus]) : 0, sairas: dSairas >= 0 ? parseNum(row[dSairas]) : 0 }
+      hoursMap[rawNimi.toLowerCase()] = hoursMap[normalized.toLowerCase()]
+    }
+  }
+
+  const sellers: SellerRaw[] = []
+  const standiRows: SellerRaw[] = []
+
+  for (let i = headerIdx + 1; i < myyjatRows.length; i++) {
+    const row = myyjatRows[i]
+    const nimi = row[idxMyyjä >= 0 ? idxMyyjä : 1]?.trim() ?? ''
+    if (!nimi || shouldSkip(nimi) || nimi === 'Kaikki myymälät') continue
+    if (row[0] && row[0].trim() && !nimi) continue
+
+    const liittEur = parseNum(row[idxLiittEur])
+    const kassa = parseNum(row[idxKassaEur])
+    const liittKpl = parseNum(row[idxLiittKpl])
+    const fsecTotalKpl = idxFsecTotal >= 0 ? parseNum(row[idxFsecTotal]) : 0
+    const fsecInternetKpl = idxFsecInternet >= 0 ? parseNum(row[idxFsecInternet]) : 0
+    const fsecKpl = (fsecTotalKpl + fsecInternetKpl) > 0 ? fsecTotalKpl + fsecInternetKpl : (idxFsecKpl >= 0 ? parseNum(row[idxFsecKpl]) : 0)
+    const fsecEur = (fsecTotalKpl * FSEC_TOTAL_SELLER) + (fsecInternetKpl * FSEC_INTERNET_SELLER)
+
+    const hours = hoursMap[nimi.toLowerCase()]
+    const normaaliTunnit = hours ? (hours.normaali || hours.total) : parseNum(row[idxTunnit])
+    const palkkaTunnit = hours ? (hours.total || hours.normaali) : normaaliTunnit
+    const tunnit = normaaliTunnit
+
+    if (liittKpl === 0 && liittEur === 0) continue
+
+    const raw: SellerRaw = { nimi, liittKpl, liittEur, fsecKpl, fsecTotalKpl, fsecInternetKpl, fsecEur, kassa, tunnit }
+
+    if (isStandi(nimi) || nimi.includes('?') || nimi.toLowerCase().includes('ei löyty')) {
+      standiRows.push(raw)
+    } else if (isRJMobSeller(nimi)) {
+      sellers.push({ ...raw, tunnit: palkkaTunnit > 0 ? palkkaTunnit : tunnit })
+    }
+  }
+
+  const storeResults: Record<string, { liittKpl: number, liittEur: number, fsecKpl: number, fsecEur: number, kassa: number, kassaRjmob: number, tunnit: number }> = {}
+
+  if (myymalaSheet) {
+    const myymalaRes = await sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: `'${myymalaSheet}'!A1:Z300` })
+    const myymalaRows = (myymalaRes.data.values ?? []).map((r: unknown[]) => r.map((c: unknown) => String(c ?? '')))
+
+    let mHeaderIdx = -1
+    for (let i = 0; i < myymalaRows.length; i++) {
+      if (myymalaRows[i].some(c => c.toLowerCase().includes('kassaprovisio') || c.toLowerCase().includes('liittymäprovisio'))) { mHeaderIdx = i; break }
+    }
+
+    if (mHeaderIdx >= 0) {
+      const mHeaders = myymalaRows[mHeaderIdx].map(h => h.toLowerCase().trim())
+      const mIdxLiittEur = findCol(mHeaders, 'liittymäprovisio', 'liittymäprov')
+      const mIdxKassa = findCol(mHeaders, 'kassaprovisio', 'kassaprov')
+      const mIdxLiittKpl = findCol(mHeaders, 'liittymä kpl', 'liittymäkpl')
+      const mIdxFsecKpl = findCol(mHeaders, 'f-secure kpl', 'fsecure kpl')
+      const mIdxFsecTotal = findCol(mHeaders, 'f-secure total', 'fsecure total', 'f-secure total security')
+      const mIdxFsecInternet = findCol(mHeaders, 'f-secure internet', 'fsecure internet', 'f-secure internet security')
+      const mIdxTunnit = findCol(mHeaders, 'tunnit')
+
+      for (let i = mHeaderIdx + 1; i < myymalaRows.length; i++) {
+        const row = myymalaRows[i]
+        const kusta = row[0]?.trim() ?? ''
+        const myyjä = row[1]?.trim() ?? ''
+
+        if (kusta && !myyjä) {
+          const isRJStore = RJ_STORES.some(s => kusta.toLowerCase().includes(s))
+          if (isRJStore) {
+            const normalizedName = kusta
+              .replace('K-Citymarket Malmi', 'Malmi').replace('Helsinki, K-Citymarket Malmi', 'Helsinki, Malmi')
+              .replace('Kauppakeskus Easton', 'Easton').replace('Helsinki, Kauppakeskus Easton', 'Helsinki, Easton')
+              .replace('Prisma Holma', 'Holma').replace('Lahti, Prisma Holma', 'Lahti, Holma')
+              .replace('Prisma Syke', 'Syke').replace('Lahti, Prisma Syke', 'Lahti, Syke')
+              .replace('K-Citymarket Kivistö', 'Kivistö').replace('Vantaa, K-Citymarket Kivistö', 'Vantaa, Kivistö')
+
+            let standiLiittKpl = 0, standiLiittEur = 0
+            for (let j = i + 1; j < myymalaRows.length; j++) {
+              const jr = myymalaRows[j]
+              const jkusta = jr[0]?.trim() ?? ''
+              const jmyyjä = jr[1]?.trim() ?? ''
+              if (jkusta && !jmyyjä) break
+              if (jmyyjä && (isStandi(jmyyjä) || jmyyjä.includes('?') || jmyyjä.toLowerCase().includes('ei löyty'))) {
+                standiLiittKpl += parseNum(jr[mIdxLiittKpl])
+                standiLiittEur += parseNum(jr[mIdxLiittEur])
+              }
+            }
+
+            const kassaRaw = parseNum(row[mIdxKassa])
+            const mFsecTotalKpl = mIdxFsecTotal >= 0 ? parseNum(row[mIdxFsecTotal]) : 0
+            const mFsecInternetKpl = mIdxFsecInternet >= 0 ? parseNum(row[mIdxFsecInternet]) : 0
+            const mFsecKpl = (mFsecTotalKpl + mFsecInternetKpl) > 0 ? mFsecTotalKpl + mFsecInternetKpl : parseNum(row[mIdxFsecKpl])
+            const mFsecEur = (mFsecTotalKpl * FSEC_TOTAL_SELLER) + (mFsecInternetKpl * FSEC_INTERNET_SELLER)
+
+            storeResults[normalizedName] = {
+              liittKpl: parseNum(row[mIdxLiittKpl]) - standiLiittKpl,
+              liittEur: parseNum(row[mIdxLiittEur]) - standiLiittEur,
+              fsecKpl: mFsecKpl, fsecEur: mFsecEur,
+              kassa: kassaRaw * 10,
+              kassaRjmob: kassaRaw * 5,
+              tunnit: parseNum(row[mIdxTunnit]),
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const results = sellers.map(s => laskeMyyja(s))
+  const active = results.filter(r => r.tyyppi !== 'ref' && r.tyyppi !== 'standi')
+  const tiimi = active.filter(r => r.tyyppi !== 'owner')
+  const storeFsecKpl = Object.values(storeResults).reduce((s, r) => s + r.fsecKpl, 0)
+
+  const totals = {
+    liittKpl: active.reduce((s, r) => s + r.liittKpl, 0),
+    liittEur: active.reduce((s, r) => s + r.liittEur, 0),
+    fsecKpl: storeFsecKpl,
+    kassa: active.reduce((s, r) => s + r.kassa, 0),
+    rjmobTulo: active.reduce((s, r) => s + r.rjmobTulo, 0),
+    tyokulu: tiimi.reduce((s, r) => s + r.tyokulu, 0),
+    netto: active.reduce((s, r) => s + r.netto, 0),
+    fsecFV: storeFsecKpl * FSEC_RECURRING * 12,
+  }
+
+  return NextResponse.json({ kuukausi: fileName, sellers: results, stores: storeResults, totals, standiInfo: standiRows.map(s => ({ nimi: s.nimi, liittKpl: s.liittKpl, liittEur: s.liittEur })), sheetNames, format: 'new' })
+}
+
+async function parseOldFormat(sheets: ReturnType<typeof google.sheets>, fileId: string, sheetNames: string[], fileName: string) {
+  const targetSheet = sheetNames.find(n =>
+    n.toLowerCase().includes('etelän') || n.toLowerCase().includes('etela') ||
+    n.toLowerCase().includes('härät') || n.toLowerCase().includes('harat')
+  ) ?? sheetNames[0]
+
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: `'${targetSheet}'!A1:P200` })
+  const rows = (res.data.values ?? []).map((r: unknown[]) => r.map((c: unknown) => String(c ?? '')))
+
+  let headerIdx = -1
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].some(c => c.toLowerCase().includes('myyjä'))) { headerIdx = i; break }
+  }
+  if (headerIdx < 0) return NextResponse.json({ error: 'Header row not found' }, { status: 400 })
+
+  const headers = rows[headerIdx].map(h => h.toLowerCase().trim())
+  const getCol = (patterns: string[]) => {
+    for (const p of patterns) {
+      const idx = headers.findIndex(h => h.includes(p))
+      if (idx >= 0) return idx
+    }
+    return -1
+  }
+
+  const idxLiittKpl = getCol(['liittymät kpl', 'liittymä kpl'])
+  const idxLiittEur = getCol(['liittymät  €', 'liittymät €', 'liittymä €'])
+  const idxFsecKpl = getCol(['f-secure kpl', 'fsecure kpl', 'fsecu'])
+  // Vanhassa formaatissa F-Secure € on jo valmiiksi laskettu provisio — luetaan suoraan
+  const idxFsecEur = getCol(['f-secure €', 'fsecure €', 'f-secure  €'])
+  // Vanhassa formaatissa kassakate on jo oikea kassakate (ei provisio) — ei kerrointa
+  const idxKassa = getCol(['kassakate'])
+  const idxTunnit = getCol(['tunnit'])
+
+  const sellers: SellerRaw[] = []
+  const standiRows: SellerRaw[] = []
+
+  let myymalaIdx = rows.length
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const cell = (rows[i][0] ?? '').toLowerCase()
+    if (cell.includes('myymälä') || cell.includes('helsinki') || cell.includes('lahti') ||
+      cell.includes('vantaa') || cell.includes('ständi') || cell.includes('standi')) {
+      myymalaIdx = i; break
+    }
+  }
+
+  for (let i = headerIdx + 1; i < myymalaIdx; i++) {
+    const row = rows[i]
+    if (!row || !row[0]) continue
+    const nimi = row[0].trim()
+    if (!nimi || shouldSkip(nimi)) continue
+
+    const fsecKpl = idxFsecKpl >= 0 ? parseNum(row[idxFsecKpl]) : 0
+    // Vanhassa formaatissa fsecEur luetaan suoraan sarakkeesta
+    const fsecEur = idxFsecEur >= 0 ? parseNum(row[idxFsecEur]) : 0
+
+    const raw: SellerRaw = {
+      nimi,
+      liittKpl: parseNum(row[idxLiittKpl]),
+      liittEur: parseNum(row[idxLiittEur]),
+      fsecKpl, fsecTotalKpl: 0, fsecInternetKpl: 0, fsecEur,
+      kassa: parseNum(row[idxKassa]),
+      tunnit: parseNum(row[idxTunnit]),
+    }
+    if (raw.liittKpl === 0 && raw.liittEur === 0) continue
+    if (isStandi(nimi)) standiRows.push(raw)
+    else sellers.push(raw)
+  }
+
+  const storeResults: Record<string, { liittKpl: number, liittEur: number, fsecKpl: number, fsecEur: number, kassa: number, kassaRjmob: number, tunnit: number }> = {}
+  for (let i = myymalaIdx; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row || !row[0]) continue
+    const nimi = row[0].trim().toLowerCase()
+    if (RJ_STORES.some(s => nimi.includes(s))) {
+      const fsecKpl = idxFsecKpl >= 0 ? parseNum(row[idxFsecKpl]) : 0
+      const fsecEur = idxFsecEur >= 0 ? parseNum(row[idxFsecEur]) : 0
+      const kassa = parseNum(row[idxKassa])
+      storeResults[rows[i][0].trim()] = {
+        liittKpl: parseNum(row[idxLiittKpl]),
+        liittEur: parseNum(row[idxLiittEur]),
+        fsecKpl, fsecEur,
+        kassa,       // vanhassa formaatissa kassakate on jo oikea arvo
+        kassaRjmob: kassa,
+        tunnit: parseNum(row[idxTunnit]),
+      }
+    }
+  }
+
+  const results = sellers.map(s => laskeMyyja(s))
+  const active = results.filter(r => r.tyyppi !== 'ref' && r.tyyppi !== 'standi')
+  const tiimi = active.filter(r => r.tyyppi !== 'owner')
+  const storeFsecKpl = Object.values(storeResults).reduce((s, r) => s + r.fsecKpl, 0)
+
+  const totals = {
+    liittKpl: active.reduce((s, r) => s + r.liittKpl, 0),
+    liittEur: active.reduce((s, r) => s + r.liittEur, 0),
+    fsecKpl: storeFsecKpl,
+    kassa: active.reduce((s, r) => s + r.kassa, 0),
+    rjmobTulo: active.reduce((s, r) => s + r.rjmobTulo, 0),
+    tyokulu: tiimi.reduce((s, r) => s + r.tyokulu, 0),
+    netto: active.reduce((s, r) => s + r.netto, 0),
+    fsecFV: storeFsecKpl * FSEC_RECURRING * 12,
+  }
+
+  return NextResponse.json({ kuukausi: fileName, sellers: results, stores: storeResults, totals, standiInfo: standiRows.map(s => ({ nimi: s.nimi, liittKpl: s.liittKpl, liittEur: s.liittEur })), sheetNames, format: 'old' })
+}
