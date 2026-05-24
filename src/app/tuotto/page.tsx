@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
-import { SellerResult, sortSheetFilesByDateDesc } from '@/lib/rjmob'
+import { SellerResult } from '@/lib/rjmob'
 
 interface DashData {
   kuukausi: string
@@ -20,6 +20,14 @@ interface DriveFile {
 
 function fmt(n: number, decimals = 0) {
   return n.toLocaleString('fi-FI', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
+function parsePrefix(name: string): number {
+  const yearMatch = name.match(/(\d{4})/)
+  const numMatch = name.match(/(\d{1,3})\./)
+  const year = yearMatch ? Number(yearMatch[1]) : 0
+  const month = numMatch ? Number(numMatch[1]) : 0
+  return year * 100 + month
 }
 
 function TopBar({ activePage, files = [], selectedFile = '', onFileChange }: {
@@ -62,7 +70,6 @@ function TopBar({ activePage, files = [], selectedFile = '', onFileChange }: {
     </div>
   )
 }
-
 
 function TehoLabel({ teho, tyyppi }: { teho: number; tyyppi: string }) {
   if (tyyppi === 'owner') return <span style={{color:'#185FA5',fontWeight:500}}>Owner</span>
@@ -111,7 +118,8 @@ export default function TuottoPage() {
 
   useEffect(() => {
     fetch('/api/files').then(r=>r.json()).then(d => {
-      const sheets = sortSheetFilesByDateDesc((d.files??[]).filter((f:DriveFile)=>f.mimeType==='application/vnd.google-apps.spreadsheet'))
+      const sheets = ((d.files??[]).filter((f:DriveFile)=>f.mimeType==='application/vnd.google-apps.spreadsheet'))
+        .sort((a:DriveFile,b:DriveFile) => parsePrefix(b.name) - parsePrefix(a.name))
       setFiles(sheets)
       if (sheets.length>0) setSelectedFile(sheets[0].id)
     }).finally(()=>setFilesLoading(false))

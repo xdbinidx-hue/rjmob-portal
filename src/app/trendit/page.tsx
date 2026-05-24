@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { sortSheetFilesByDateAsc } from '@/lib/rjmob'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts'
 
 interface MonthData {
@@ -10,6 +9,18 @@ interface MonthData {
   liittKpl: number
   fsecKpl: number
   tyokulu: number
+}
+
+interface DriveFile {
+  id: string; name: string; mimeType: string
+}
+
+function parsePrefix(name: string): number {
+  const yearMatch = name.match(/(\d{4})/)
+  const numMatch = name.match(/(\d{1,3})\./)
+  const year = yearMatch ? Number(yearMatch[1]) : 0
+  const month = numMatch ? Number(numMatch[1]) : 0
+  return year * 100 + month
 }
 
 function TopBar({ activePage }: { activePage: string }) {
@@ -38,7 +49,6 @@ function TopBar({ activePage }: { activePage: string }) {
   )
 }
 
-
 export default function TrendPage() {
   const [months, setMonths] = useState<MonthData[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,12 +57,12 @@ export default function TrendPage() {
     fetch('/api/files')
       .then(r => r.json())
       .then(async d => {
-        const sheets = sortSheetFilesByDateAsc((d.files ?? []).filter((f: {mimeType:string}) =>
+        const sheets = ((d.files ?? []).filter((f: DriveFile) =>
           f.mimeType === 'application/vnd.google-apps.spreadsheet'
-        ))
+        )).sort((a: DriveFile, b: DriveFile) => parsePrefix(a.name) - parsePrefix(b.name))
 
         const results: MonthData[] = []
-        for (const f of sheets as {id:string,name:string}[]) {
+        for (const f of sheets) {
           const res = await fetch(`/api/sheets?fileId=${f.id}`)
           const data = await res.json()
           if (data.totals) {
@@ -88,7 +98,6 @@ export default function TrendPage() {
     <div style={{minHeight:'100vh',background:'#f8f8f6',fontFamily:'system-ui,sans-serif'}}>
       <TopBar activePage="/trendit" />
       <div style={{maxWidth:900,margin:'0 auto',padding:'16px'}}>
-
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8,marginBottom:16}}>
           {[
             {l:'Paras kuukausi', v: bestMonth?.kuukausi ?? '-', s: fmt(bestMonth?.netto ?? 0)},
@@ -103,7 +112,6 @@ export default function TrendPage() {
             </div>
           ))}
         </div>
-
         <div style={{background:'white',border:'0.5px solid #eee',borderRadius:12,padding:'16px',marginBottom:12}}>
           <div style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Netto vs Työkulu</div>
           <ResponsiveContainer width="100%" height={220}>
@@ -118,7 +126,6 @@ export default function TrendPage() {
             </BarChart>
           </ResponsiveContainer>
         </div>
-
         <div style={{background:'white',border:'0.5px solid #eee',borderRadius:12,padding:'16px',marginBottom:12}}>
           <div style={{fontSize:11,fontWeight:500,color:'#888',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:12}}>Liittymät & F-Secure trendi</div>
           <ResponsiveContainer width="100%" height={200}>
@@ -133,7 +140,6 @@ export default function TrendPage() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-
         <div style={{background:'white',border:'0.5px solid #eee',borderRadius:12,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
             <thead>
@@ -165,7 +171,6 @@ export default function TrendPage() {
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   )
