@@ -90,7 +90,7 @@ export default function EtelanHaratPage() {
 
         const sheets = (d.files ?? []).filter((f: DriveFile) =>
           f.mimeType === 'application/vnd.google-apps.spreadsheet'
-        ).sort((a, b) => parsePrefix(b.name) - parsePrefix(a.name))
+        ).sort((a: DriveFile, b: DriveFile) => parsePrefix(b.name) - parsePrefix(a.name))
         setFiles(sheets)
         if (sheets.length > 0) setSelectedFile(sheets[0].id)
       })
