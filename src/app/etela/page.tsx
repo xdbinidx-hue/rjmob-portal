@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { sortSheetFilesByDateDesc } from '@/lib/rjmob'
 
 interface SellerResult {
   nimi: string
@@ -84,9 +83,14 @@ export default function EtelanHaratPage() {
     fetch('/api/files')
       .then(r => r.json())
       .then(d => {
-        const sheets = sortSheetFilesByDateDesc((d.files ?? []).filter((f: DriveFile) =>
+        const parsePrefix = (name: string) => {
+          const match = name.match(/^\s*(\d{1,3})/) 
+          return match ? Number(match[1]) : 0
+        }
+
+        const sheets = (d.files ?? []).filter((f: DriveFile) =>
           f.mimeType === 'application/vnd.google-apps.spreadsheet'
-        ))
+        ).sort((a, b) => parsePrefix(b.name) - parsePrefix(a.name))
         setFiles(sheets)
         if (sheets.length > 0) setSelectedFile(sheets[0].id)
       })
