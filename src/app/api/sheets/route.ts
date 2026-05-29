@@ -293,7 +293,7 @@ async function parseOldFormat(sheets: ReturnType<typeof google.sheets>, fileId: 
       nimi,
       liittKpl: parseNum(row[idxLiittKpl]),
       liittEur: parseNum(row[idxLiittEur]),
-      fsecKpl, fsecTotalKpl: 0, fsecInternetKpl: 0, fsecEur,
+      fsecKpl, fsecTotalKpl: 0, fsecInternetKpl: 0, fsecEur, palkkaTunnit: parseNum(row[idxTunnit]),
       kassa: parseNum(row[idxKassa]),
       tunnit: parseNum(row[idxTunnit]),
     }
