@@ -278,7 +278,7 @@ Generoi viesti:`
                   </thead>
                   <tbody>
                     {Object.entries(stores).sort((a,b) => b[1].liittEur - a[1].liittEur).map(([nimi, s], i) => {
-                      const teho = s.tunnit > 0 ? (s.liittEur + s.kassa) / s.tunnit : 0
+                      const teho = s.tunnit > 0 ? s.liittEur / s.tunnit : 0
                       const tehoColor = teho >= 9 ? '#3B6D11' : teho >= 7 ? '#854F0B' : '#A32D2D'
                       return (
                         <tr key={nimi} style={{background: i % 2 === 0 ? 'white' : '#fafafa'}}>
