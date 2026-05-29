@@ -77,7 +77,7 @@ async function parseNewFormat(sheets: ReturnType<typeof google.sheets>, fileId: 
   const headers = myyjatRows[headerIdx].map(h => h.toLowerCase().trim())
   const idxMyyjä = findCol(headers, 'myyjä', 'myyjat', 'nimi')
   const idxLiittEur = findCol(headers, 'liittymäprovisio', 'liittymäprov', 'liittymä €', 'liittymä€')
-  const idxKassaEur = findCol(headers, 'kassaprovisio', 'kassaprov')
+  const idxKassaEur = findCol(headers, 'kassakate', 'kassaprovisio', 'kassaprov')
   const idxLiittKpl = findCol(headers, 'liittymä kpl', 'liittymäkpl', 'liittymät kpl')
   const idxFsecTotal = findCol(headers, 'f-secure total', 'fsecure total', 'f-secure total security')
   const idxFsecInternet = findCol(headers, 'f-secure internet', 'fsecure internet', 'f-secure internet security')
@@ -161,7 +161,7 @@ async function parseNewFormat(sheets: ReturnType<typeof google.sheets>, fileId: 
     if (mHeaderIdx >= 0) {
       const mHeaders = myymalaRows[mHeaderIdx].map(h => h.toLowerCase().trim())
       const mIdxLiittEur = findCol(mHeaders, 'liittymäprovisio', 'liittymäprov')
-      const mIdxKassa = findCol(mHeaders, 'kassaprovisio', 'kassaprov')
+      const mIdxKassa = findCol(mHeaders, 'kassakate', 'kassaprovisio', 'kassaprov')
       const mIdxLiittKpl = findCol(mHeaders, 'liittymä kpl', 'liittymäkpl')
       const mIdxFsecKpl = findCol(mHeaders, 'f-secure kpl', 'fsecure kpl')
       const mIdxFsecTotal = findCol(mHeaders, 'f-secure total', 'fsecure total', 'f-secure total security')
