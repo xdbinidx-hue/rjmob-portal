@@ -76,66 +76,6 @@ export function shouldSkip(nimi: string): boolean {
   return SKIP_ROWS.some(s => nimi.toLowerCase().includes(s))
 }
 
-const MONTH_NAME_ORDER: Record<string, number> = {
-  tammikuu: 1, tammi: 1,
-  helmikuu: 2, helmi: 2,
-  maaliskuu: 3, maalis: 3,
-  huhtikuu: 4, huhti: 4,
-  toukokuu: 5, touko: 5,
-  kesäkuu: 6, kesä: 6, kesa: 6,
-  heinäkuu: 7, heinä: 7, heina: 7,
-  elokuu: 8, elo: 8,
-  syyskuu: 9, syys: 9,
-  lokakuu: 10, loka: 10,
-  marraskuu: 11, marras: 11,
-  joulukuu: 12, joulu: 12,
-}
-
-export function parseSheetDate(name: string): { year: number; month: number } {
-  const yearMatch = name.match(/(20\d{2})/)
-  const year = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear()
-  const normalized = name
-    .toLowerCase()
-    .replace('myyntiseuranta', '')
-    .replace(/20\d{2}/g, ' ')
-    .replace(/[^a-zäö0-9 ]/g, ' ')
-    .trim()
-
-  const tokens = normalized.split(/\s+/).filter(Boolean)
-  const monthToken = tokens.find(token => Object.prototype.hasOwnProperty.call(MONTH_NAME_ORDER, token)) ?? ''
-  const monthFromName = MONTH_NAME_ORDER[monthToken] ?? 0
-
-  const prefixMatch = normalized.match(/^\s*(\d{1,2})/) 
-  const monthFromPrefix = prefixMatch ? Number(prefixMatch[1]) : 0
-
-  const monthFromNumber = tokens
-    .map(token => Number(token))
-    .find(num => Number.isInteger(num) && num >= 1 && num <= 12) ?? 0
-
-  return {
-    year,
-    month: monthFromPrefix || monthFromName || monthFromNumber || 0,
-  }
-}
-
-export function sortSheetFilesByDateDesc<T extends { name: string }>(files: T[]) {
-  return [...files].sort((a, b) => {
-    const aa = parseSheetDate(a.name)
-    const bb = parseSheetDate(b.name)
-    if (bb.year !== aa.year) return bb.year - aa.year
-    return bb.month - aa.month
-  })
-}
-
-export function sortSheetFilesByDateAsc<T extends { name: string }>(files: T[]) {
-  return [...files].sort((a, b) => {
-    const aa = parseSheetDate(a.name)
-    const bb = parseSheetDate(b.name)
-    if (aa.year !== bb.year) return aa.year - bb.year
-    return aa.month - bb.month
-  })
-}
-
 export interface SellerRaw {
   nimi: string
   liittKpl: number
@@ -145,7 +85,8 @@ export interface SellerRaw {
   fsecInternetKpl: number
   fsecEur: number
   kassa: number
-  tunnit: number
+  tunnit: number       // normaali työ (myyntiseuranta)
+  palkkaTunnit: number // kokonaistunnit (tuottoseuranta)
 }
 
 export interface SellerResult {
@@ -159,22 +100,25 @@ export interface SellerResult {
   fsecEur: number
   fsecBonus: number
   kassa: number
-  tunnit: number
+  tunnit: number       // normaali työ
+  palkkaTunnit: number // kokonaistunnit
   rjmobLiitt: number
   rjmobKassa: number
   rjmobFsec: number
   rjmobTulo: number
   myyjaProv: number
+  palkkaBrutto: number
   tyokulu: number
   netto: number
   roi: number | null
-  teho: number
+  teho: number         // laskettu normaali tunnit (myyntiseuranta)
   tehoStatus: 'green' | 'amber' | 'red' | 'special'
   fsecFV: number
+  leikkuri: boolean
 }
 
 export function laskeMyyja(raw: SellerRaw): SellerResult {
-  const { nimi, liittEur, liittKpl, fsecKpl, fsecTotalKpl, fsecInternetKpl, fsecEur, kassa, tunnit } = raw
+  const { nimi, liittEur, liittKpl, fsecKpl, fsecTotalKpl, fsecInternetKpl, fsecEur, kassa, tunnit, palkkaTunnit } = raw
 
   const tyyppi = isOwner(nimi) ? 'owner'
     : isKrenar(nimi) ? 'krenar'
@@ -188,10 +132,10 @@ export function laskeMyyja(raw: SellerRaw): SellerResult {
   if (tyyppi === 'ref' || tyyppi === 'standi') {
     return {
       nimi, tyyppi, liittKpl, liittEur, fsecKpl, fsecTotalKpl, fsecInternetKpl,
-      fsecEur, fsecBonus: bonus, kassa, tunnit,
+      fsecEur, fsecBonus: bonus, kassa, tunnit, palkkaTunnit,
       rjmobLiitt: 0, rjmobKassa: 0, rjmobFsec: 0, rjmobTulo: 0,
-      myyjaProv: 0, tyokulu: 0, netto: 0, roi: null,
-      teho: 0, tehoStatus: 'special', fsecFV: fsecKpl * FSEC_RECURRING * 12,
+      myyjaProv: 0, palkkaBrutto: 0, tyokulu: 0, netto: 0, roi: null,
+      teho: 0, tehoStatus: 'special', fsecFV: fsecKpl * FSEC_RECURRING * 12, leikkuri: false,
     }
   }
 
@@ -208,28 +152,39 @@ export function laskeMyyja(raw: SellerRaw): SellerResult {
 
   const rjmobKassa = kassa * 5.0
   const rjmobTulo = rjmobLiitt + rjmobKassa + rjmobFsec
+
+  // Teho lasketaan normaali tunnit (myyntiseuranta)
   const teho = tunnit > 0 ? (myyjaProv + kassa) / tunnit : 0
   const fsecFV = fsecKpl * FSEC_RECURRING * 12
 
+  let palkkaBrutto = 0
   let tyokulu = 0
   let netto = 0
   let roi: number | null = null
+  let leikkuri = false
 
   if (tyyppi === 'owner') {
+    palkkaBrutto = 0
     tyokulu = 0
     netto = rjmobTulo
     roi = null
   } else if (tyyppi === 'krenar') {
-    tyokulu = myyjaProv + kassa + fsecEur + bonus
+    palkkaBrutto = myyjaProv + kassa + fsecEur + bonus
+    tyokulu = palkkaBrutto
     netto = rjmobTulo - tyokulu
     roi = tyokulu > 0 ? (netto / tyokulu) * 100 : 0
   } else {
     const tp = getTuntipalkka(nimi)
-    const pohja = tunnit * tp
+    // Palkka lasketaan kokonaistunneista
+    const pohja = palkkaTunnit * tp
     const prov = myyjaProv + kassa + fsecEur + bonus
-    tyokulu = (pohja + prov) * SIVU_KERROIN
+    palkkaBrutto = pohja + prov
+    tyokulu = palkkaBrutto * SIVU_KERROIN
     netto = rjmobTulo - tyokulu
     roi = tyokulu > 0 ? (netto / tyokulu) * 100 : 0
+
+    // Leikkuri: jos tyokulu > rjmobTulo
+    if (tyokulu > rjmobTulo) leikkuri = true
   }
 
   const tehoStatus = tyyppi === 'owner' || tyyppi === 'krenar' ? 'special'
@@ -239,10 +194,10 @@ export function laskeMyyja(raw: SellerRaw): SellerResult {
 
   return {
     nimi, tyyppi, liittKpl, liittEur, fsecKpl, fsecTotalKpl, fsecInternetKpl,
-    fsecEur, fsecBonus: bonus, kassa, tunnit,
+    fsecEur, fsecBonus: bonus, kassa, tunnit, palkkaTunnit,
     rjmobLiitt, rjmobKassa, rjmobFsec, rjmobTulo,
-    myyjaProv, tyokulu, netto, roi,
-    teho, tehoStatus, fsecFV,
+    myyjaProv, palkkaBrutto, tyokulu, netto, roi,
+    teho, tehoStatus, fsecFV, leikkuri,
   }
 }
 

@@ -143,7 +143,7 @@ async function parseNewFormat(sheets: ReturnType<typeof google.sheets>, fileId: 
     if (isStandi(nimi) || nimi.includes('?') || nimi.toLowerCase().includes('ei löyty')) {
       standiRows.push(raw)
     } else if (isRJMobSeller(nimi)) {
-      sellers.push({ ...raw, tunnit: palkkaTunnit > 0 ? palkkaTunnit : tunnit })
+      sellers.push({ ...raw, tunnit: normaaliTunnit, palkkaTunnit: palkkaTunnit > 0 ? palkkaTunnit : normaaliTunnit })
     }
   }
 
