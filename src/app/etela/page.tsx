@@ -215,7 +215,9 @@ Generoi viesti:`
                       <th style={thStyle}>Kassakate</th>
                       <th style={thStyle}>Tunnit</th>
                       <th style={thStyle}>Provisio yht.</th>
-                      <th style={thStyle}>Teho €/h</th>
+                      <th style={thStyle}>Liitt teho</th>
+                      <th style={thStyle}>Liitt+Kassa teho</th>
+                      <th style={thStyle}>Total teho</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -234,7 +236,9 @@ Generoi viesti:`
                           <td style={tdStyle}>{fmt(s.kassa)} €</td>
                           <td style={tdStyle}>{fmt(s.tunnit)}</td>
                           <td style={{...tdStyle, fontWeight:500}}>{fmt(provisio)} €</td>
-                          <td style={{...tdStyle, color: tehoColor, fontWeight:500}}>{fmt(myyntiTeho)} €/h</td>
+                          <td style={{...tdStyle, color: s.tunnit > 0 && s.liittEur/s.tunnit >= 9 ? '#3B6D11' : s.tunnit > 0 && s.liittEur/s.tunnit >= 7 ? '#854F0B' : '#A32D2D', fontWeight:500}}>{fmt(s.tunnit > 0 ? s.liittEur/s.tunnit : 0, 2)} €/h</td>
+                          <td style={{...tdStyle, color: tehoColor, fontWeight:500}}>{fmt(myyntiTeho, 2)} €/h</td>
+                          <td style={{...tdStyle, color: s.tunnit > 0 && (s.liittEur+s.kassa+s.fsecEur)/s.tunnit >= 9 ? '#3B6D11' : s.tunnit > 0 && (s.liittEur+s.kassa+s.fsecEur)/s.tunnit >= 7 ? '#854F0B' : '#A32D2D', fontWeight:500}}>{fmt(s.tunnit > 0 ? (s.liittEur+s.kassa+s.fsecEur)/s.tunnit : 0, 2)} €/h</td>
                         </tr>
                       )
                     })}
@@ -273,7 +277,9 @@ Generoi viesti:`
                       <th style={thStyle}>F-Secure kpl</th>
                       <th style={thStyle}>Kassakate</th>
                       <th style={thStyle}>Tunnit</th>
-                      <th style={thStyle}>Teho €/h</th>
+                      <th style={thStyle}>Liitt teho</th>
+                      <th style={thStyle}>Liitt+Kassa teho</th>
+                      <th style={thStyle}>Total teho</th>
                     </tr>
                   </thead>
                   <tbody>
