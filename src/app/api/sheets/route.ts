@@ -138,7 +138,7 @@ async function parseNewFormat(sheets: ReturnType<typeof google.sheets>, fileId: 
 
     if (liittKpl === 0 && liittEur === 0) continue
 
-    const raw: SellerRaw = { nimi, liittKpl, liittEur, fsecKpl, fsecTotalKpl, fsecInternetKpl, fsecEur, kassa, tunnit }
+    const raw: SellerRaw = { nimi, liittKpl, liittEur, fsecKpl, fsecTotalKpl, fsecInternetKpl, fsecEur, kassa, tunnit, palkkaTunnit }
 
     if (isStandi(nimi) || nimi.includes('?') || nimi.toLowerCase().includes('ei löyty')) {
       standiRows.push(raw)
