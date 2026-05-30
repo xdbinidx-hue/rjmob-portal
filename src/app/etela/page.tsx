@@ -296,7 +296,9 @@ Generoi viesti:`
                           <td style={{...tdStyle, color:'#0F6E56', fontWeight:500}}>{s.fsecKpl}</td>
                           <td style={tdStyle}>{fmt(s.kassa)} €</td>
                           <td style={tdStyle}>{fmt(s.tunnit)}</td>
-                          <td style={{...tdStyle, color: tehoColor, fontWeight:500}}>{fmt(teho)} €/h</td>
+                          <td style={{...tdStyle, color: tehoColor, fontWeight:500}}>{teho.toFixed(2)} €/h</td>
+                          <td style={{...tdStyle, color: s.tunnit > 0 && (s.liittEur+s.kassa)/s.tunnit >= 9 ? '#3B6D11' : s.tunnit > 0 && (s.liittEur+s.kassa)/s.tunnit >= 7 ? '#854F0B' : '#A32D2D', fontWeight:500}}>{s.tunnit > 0 ? ((s.liittEur+s.kassa)/s.tunnit).toFixed(2) : '0.00'} €/h</td>
+                          <td style={{...tdStyle, color: s.tunnit > 0 && (s.liittEur+s.kassa+(s.fsecEur??0))/s.tunnit >= 9 ? '#3B6D11' : s.tunnit > 0 && (s.liittEur+s.kassa+(s.fsecEur??0))/s.tunnit >= 7 ? '#854F0B' : '#A32D2D', fontWeight:500}}>{s.tunnit > 0 ? ((s.liittEur+s.kassa+(s.fsecEur??0))/s.tunnit).toFixed(2) : '0.00'} €/h</td>
                         </tr>
                       )
                     })}
